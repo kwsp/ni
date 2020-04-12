@@ -105,6 +105,28 @@ char editorReadKey() {
     while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
         if (nread == -1 && errno != EAGAIN) die("read");
     }
+
+    // Process arrow keys by immediately reading the next
+    // two bytes after an ESC press
+    //
+    // We'll handle longer escape sequences in the future
+    if (c == '\x1b') {
+        char seq[3];
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+        if (seq[0] == '[') {
+            switch (seq[1]) {
+                case 'A': return 'k';
+                case 'B': return 'j';
+                case 'C': return 'l';
+                case 'D': return 'h';
+            }
+        }
+
+        return '\x1b';
+    }
+
     return c;
 }
 
