@@ -3,20 +3,35 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <termio.h>
 #include <unistd.h>
 
+/***defines ***/
+
+#define CTRL_KEY(k) ((k) & 0x1f)
+
 /*** data ***/
 
-struct termios orig_termios;
+struct editorConfig {
+    int screenrows;
+    int screencols;
+    struct termios orig_termios;
+};
+
+struct editorConfig E;
 
 /*** terminal ***/
+
+void editorClearScreen();
 
 /*
  * Errorhandling.
  * Check each of our library calls for failure and call die when they fail
  */
 void die(const char *s) {
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
     perror(s);
     exit(1);
 }
@@ -25,7 +40,7 @@ void die(const char *s) {
  * Restore terminal attributes before quitting the program
  */
 void disableRawMode() {
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1) die("tcsetattr");
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1) die("tcsetattr");
 }
 
 /*
@@ -33,13 +48,13 @@ void disableRawMode() {
  */
 void enableRawMode() {
     // Read the current attributes into a struct
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr");
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
 
     // Register disableRawMode to be called at exit
     atexit(disableRawMode);
 
     // Copy the original attributes
-    struct termios raw = orig_termios;
+    struct termios raw = E.orig_termios;
 
     // Disable input flags:
     //     IXON: Ctrl-S and Ctrl-Q (flow control)
@@ -77,23 +92,93 @@ void enableRawMode() {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 }
 
+/*
+ * Reads a key press and return the char
+ */
+char editorReadKey() {
+    int nread;
+    char c;
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+        if (nread == -1 && errno != EAGAIN) die("read");
+    }
+    return c;
+}
+
+int getWindowSize(int *rows, int *cols) {
+    struct winsize ws;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+        return -1;
+    } else {
+        *cols = ws.ws_col;
+        *rows = ws.ws_row;
+        return 0;
+    }
+}
+
+/*** output ***/
+
+/*
+ * Write an escape sequence to the screen.
+ * Escape sequence begins with the "\x1b"
+ * byte which means ESCAPE or 27 in decimal,
+ * followed by '['.
+ * '2J' clears the entire screen
+ */
+
+void editorClearScreen() {
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
+/*
+ * Handle drawing each row of the text buffer being edited
+ */
+void editorDrawRow() {
+    int y;
+    for (y=0; y<24; y++) {
+        write(STDOUT_FILENO, "~\r\n", 3);
+    }
+}
+
+void editorRefreshScreen() {
+    editorClearScreen();
+
+    editorDrawRow();
+
+    // Reset cursor position to 0,0
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
+/*** input ***/
+
+/*
+ * Waits for a keypress and handles it
+ */
+void editorProcessKeypress() {
+    char c = editorReadKey();
+
+    switch (c) {
+        case CTRL_KEY('q'):
+            editorClearScreen();
+            exit(0);
+            break;
+    }
+}
+
 /*** init ***/
+
+void initEditor() {
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+}
 
 int main() {
     enableRawMode();
+    initEditor();
 
     while (1) {
-        char c = '\0';
-
-        if (read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
-
-        if (iscntrl(c)) {
-            printf("%d\r\n", c);
-        } else {
-            printf("%d, (%c)\r\n", c, c);
-        }
-
-        if (c == 'q') break;
+        editorRefreshScreen();
+        editorProcessKeypress();
     };
 
     return 0;
