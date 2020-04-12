@@ -104,11 +104,46 @@ char editorReadKey() {
     return c;
 }
 
+int getCursorPosition(int *rows, int *cols) {
+    char buf[32];
+    unsigned int i = 0;
+
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+
+    while (i < sizeof(buf) - 1) {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
+        if (buf[i] == 'R') break;
+        i++;
+    }
+
+    // Null terminate the string
+    buf[i] = '\0';
+
+    // Make sure it begins with <ESC>[
+    if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+    return 0;
+}
+
 int getWindowSize(int *rows, int *cols) {
     struct winsize ws;
 
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-        return -1;
+        // If sys/ioctl fail to give us the screen size,
+        // we do it the hard way :)
+        // Send the cursor to the bottom right corner of the screen and query
+        // its position.
+        //
+        // There isn't a command to send the cursor to the bottom right of the screen :(
+        // However, the C (cursor forward) and B (cursor down) escape sequences
+        // are documented to stop the cursor from going past the edge of the
+        // screen
+        //
+        // We don't use the H escape sequence because it is not documented
+        // what happens when you move the cursor off screen.
+        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
+        return getCursorPosition(rows, cols);
     } else {
         *cols = ws.ws_col;
         *rows = ws.ws_row;
@@ -134,17 +169,21 @@ void editorClearScreen() {
 /*
  * Handle drawing each row of the text buffer being edited
  */
-void editorDrawRow() {
+void editorDrawRows() {
     int y;
-    for (y=0; y<24; y++) {
-        write(STDOUT_FILENO, "~\r\n", 3);
+    for (y=0; y < E.screenrows; y++) {
+        write(STDOUT_FILENO, "~", 1);
+
+        if (y < E.screenrows -1) {
+            write(STDOUT_FILENO, "\r\n", 2);
+        }
     }
 }
 
 void editorRefreshScreen() {
     editorClearScreen();
 
-    editorDrawRow();
+    editorDrawRows();
 
     // Reset cursor position to 0,0
     write(STDOUT_FILENO, "\x1b[H", 3);
