@@ -556,6 +556,30 @@ void editorMoveCursor(int key) {
                 E.cx = 0;
             }
             break;
+
+        case 'w':
+        case 'W':
+        case 'e':
+        case 'E':
+            if (row) {
+                if (key == 'W' || key == 'E') {
+                    // Move pass all chars
+                    while (E.cx < row->size && !isspace(E.row[E.cy].chars[E.cx++])) {}
+                } else { // w, e
+                    // TODO: moving words while stopping at punctuations doesn't really work
+                    while (E.cx < row->size && !isspace(E.row[E.cy].chars[E.cx++]) && !ispunct(E.row[E.cy].chars[E.cx])) {}
+                }
+                if (key == 'W' || key == 'w') {
+                    // Move pass all spaces
+                    while (E.cx < row->size && E.row[E.cy].chars[E.cx] == ' ') E.cx++;
+                }
+
+                if (E.cx >= row->size) {
+                    E.cy++;
+                    E.cx = 0;
+                }
+
+            }
     }
 
     // Snap cursor to end of line
@@ -627,6 +651,12 @@ void editorProcessKeypress() {
             case ARROW_DOWN:
             case ARROW_LEFT:
             case ARROW_RIGHT:
+            case 'w':
+            case 'W':
+            case 'b':
+            case 'B':
+            case 'e':
+            case 'E':
                 editorMoveCursor(c);
                 break;
         }
