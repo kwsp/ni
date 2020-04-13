@@ -40,12 +40,14 @@ typedef struct {
 } erow;
 
 struct editorConfig {
-    int cx, cy;
-    int screenrows;
+    int cx, cy; // Cursor coord in files
+    int rowoff; // Row offset for scroll
+    int coloff; // Column offset
+    int screenrows; // Screen dimensions
     int screencols;
-    int numrows;
-    erow *row;
-    struct termios orig_termios;
+    int numrows; // No. rows in buffer
+    erow *row; // dynamically allocated line array of the buffer
+    struct termios orig_termios; // Original terminal attributes
 };
 
 struct editorConfig E;
@@ -275,6 +277,15 @@ void abFree(struct abuf *ab) {
 
 /*** output ***/
 
+void editorScroll() {
+    if (E.cy < E.rowoff) {
+        E.rowoff = E.cy;
+    }
+    if (E.cy >= E.rowoff + E.screenrows) {
+        E.rowoff = E.cy - E.screenrows + 1;
+    }
+}
+
 /*
  * Write an escape sequence to the screen.
  * Escape sequence begins with the "\x1b"
@@ -282,7 +293,6 @@ void abFree(struct abuf *ab) {
  * followed by '['.
  * '2J' clears the entire screen
  */
-
 void editorClearScreen() {
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H", 3);
@@ -294,7 +304,8 @@ void editorClearScreen() {
 void editorDrawRows(struct abuf *ab) {
     int y;
     for (y=0; y < E.screenrows; y++) {
-        if (y >= E.numrows) {
+        int filerow = y + E.rowoff;
+        if (filerow >= E.numrows) {
             if (E.numrows == 0 && y == E.screenrows / 3) {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome),
@@ -315,9 +326,9 @@ void editorDrawRows(struct abuf *ab) {
             }
 
         } else {
-            int len = E.row[y].size;
+            int len = E.row[filerow].size;
             if (len > E.screencols) len = E.screencols;
-            abAppend(ab, E.row[y].chars, len);
+            abAppend(ab, E.row[filerow].chars, len);
         }
 
         // Clear line
@@ -329,6 +340,7 @@ void editorDrawRows(struct abuf *ab) {
 }
 
 void editorRefreshScreen() {
+    editorScroll();
     struct abuf ab = ABUF_INIT;
 
     // Hide cursor
@@ -340,7 +352,7 @@ void editorRefreshScreen() {
 
     // Set cursor position
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1 - E.rowoff, E.cx + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -356,10 +368,14 @@ void editorRefreshScreen() {
 void editorMoveCursor(int key) {
     switch (key) {
         case ARROW_UP:
-            if (E.cy != 0) E.cy--;
+            if (E.cy != 0) {
+                E.cy--;
+            }
             break;
         case ARROW_DOWN:
-            if (E.cy < E.screenrows - 1) E.cy++;
+            if (E.cy < E.numrows) {
+                E.cy++;
+            }
             break;
         case ARROW_LEFT:
             if (E.cx != 0) E.cx--;
@@ -413,6 +429,8 @@ void editorProcessKeypress() {
 void initEditor() {
     E.cx = 0;
     E.cy = 0;
+    E.rowoff = 0;
+    E.coloff = 0;
     E.numrows = 0;
     E.row = NULL;
 
