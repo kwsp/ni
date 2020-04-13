@@ -19,7 +19,7 @@
 /***defines ***/
 
 #define NI_VERSION "0.0.1"
-#define NI_TAB_STOP 8
+#define NI_TAB_STOP 4
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -32,14 +32,45 @@ enum editorKeys {
     HOME_KEY,
     END_KEY,
     PAGE_UP,
-    PAGE_DOWN
+    PAGE_DOWN,
+    SPACE,
 };
 
 enum editorModes {
     INSERT_MODE,
     NORMAL_MODE,
-    COMMAND_MODE
+    COMMAND_MODE,
 };
+
+/*** dynamic string type ***/
+typedef struct {
+    char *b; // Heap allocated buffer
+    int len; // string length
+} abuf;
+
+#define ABUF_INIT {NULL, 0}
+
+/*** dynamic string methods ***/
+void abAppend(abuf *ab, const char *s, int len) {
+    char *new = realloc(ab->b, ab->len + len);
+
+    if (new == NULL) return;
+    memcpy(&new[ab->len], s, len);
+    ab->b = new;
+    ab->len += len;
+}
+
+void abDelete(abuf *ab, size_t n) {
+    // Reduce len, does not reallocate memory
+    if (ab->len - n > 0) {
+        ab->len -= n;
+    }
+}
+
+void abFree(abuf *ab) {
+    ab->len = 0;
+    free(ab->b);
+}
 
 /*** data ***/
 
@@ -52,17 +83,23 @@ typedef struct {
 
 struct editorConfig {
     enum editorModes mode; // Editor mode
+    abuf cmdbuf; // Command buffer for command mode and others
+    int cmdrep; // Movement repetition
+
     int cx, cy; // Cursor coord in files
     int rx; // Cursor x rendered with tabs
     int rowoff; // Row offset for scroll
     int coloff; // Column offset
     int screenrows; // Screen dimensions
     int screencols;
+
     int numrows; // No. rows in buffer
     erow *row; // dynamically allocated line array of the buffer
+
     char *filename; // file in current editor buffer
-    char statusmsg[80];
+    char statusmsg[80]; // Status
     time_t statusmsg_time;
+
     struct termios orig_termios; // Original terminal attributes
 };
 
@@ -314,27 +351,6 @@ void editorOpen(char *filename) {
     fclose(fp);
 }
 
-/*** dynamic string ***/
-struct abuf {
-    char *b;
-    int len;
-};
-
-#define ABUF_INIT {NULL, 0}
-
-void abAppend(struct abuf *ab, const char *s, int len) {
-    char *new = realloc(ab->b, ab->len + len);
-
-    if (new == NULL) return;
-    memcpy(&new[ab->len], s, len);
-    ab->b = new;
-    ab->len += len;
-}
-
-void abFree(struct abuf *ab) {
-    free(ab->b);
-}
-
 /*** output ***/
 
 void editorScroll() {
@@ -372,7 +388,7 @@ void editorClearScreen() {
 /*
  * Handle drawing each row of the text buffer being edited
  */
-void editorDrawRows(struct abuf *ab) {
+void editorDrawRows(abuf *ab) {
     int y;
     for (y=0; y < E.screenrows; y++) {
 
@@ -432,7 +448,7 @@ char *editorGetMode() {
     return "UNKNOWN\0";
 }
 
-void editorDrawStatusBar(struct abuf *ab) {
+void editorDrawStatusBar(abuf *ab) {
     abAppend(ab, "\x1b[7m", 4); // Set status bar background
 
     // Create status (left) and rstatus (right) messages
@@ -460,18 +476,18 @@ void editorDrawStatusBar(struct abuf *ab) {
     abAppend(ab, "\r\n", 2);
 }
 
-void editorDrawMessageBar(struct abuf *ab) {
+void editorDrawMessageBar(abuf *ab) {
     abAppend(ab, "\x1b[K", 3); // Clear line
     int msglen = strlen(E.statusmsg);
     if (msglen > E.screencols) msglen = E.screencols;
-    if (msglen && time(NULL) - E.statusmsg_time < 5) {
-        abAppend(ab, E.statusmsg, msglen);
-    }
+    /*if (msglen && time(NULL) - E.statusmsg_time < 5) {*/
+    abAppend(ab, E.statusmsg, msglen);
+    /*}*/
 }
 
 void editorRefreshScreen() {
     editorScroll();
-    struct abuf ab = ABUF_INIT;
+    abuf ab = ABUF_INIT;
 
     // Hide cursor
     abAppend(&ab, "\x1b[?25l", 6);
@@ -563,6 +579,7 @@ void editorProcessKeypress() {
                 break;
             case ':':
                 E.mode = COMMAND_MODE;
+                editorSetStatusMsg(":");
                 break;
 
             case CTRL_KEY('q'): // Ctrl-Q to quit
@@ -627,13 +644,34 @@ void editorProcessKeypress() {
                 editorMoveCursor(c);
                 break;
         }
-    } else {
+    } else if (E.mode == COMMAND_MODE) {
         switch (c) {
+            case 13: // Enter key executes command
+                // Execute command
+                // Clear command buffer
+
+                // return to normal by falling through
             case '\x1b': // Esc to return to normal mode
+                abFree(&E.cmdbuf); // free the command buffer
                 E.mode = NORMAL_MODE;
                 break;
 
+            case '8': // Delete key
+                abDelete(&E.cmdbuf, 1);
+                break;
+
+            default: // Append characters to E.cmdbuf
+                if (isprint(c)) {
+                    abAppend(&E.cmdbuf, (char *) &c, 1);
+                    editorSetStatusMsg(":%s", E.cmdbuf.b);
+                }
         }
+
+
+    } else {
+        char errbuf[80];
+        sprintf(errbuf, "E.mode not recognised: %d\n", E.mode);
+        die(errbuf);
     }
 }
 
@@ -641,6 +679,8 @@ void editorProcessKeypress() {
 
 void initEditor() {
     E.mode = NORMAL_MODE;
+    E.cmdbuf.b = NULL;
+    E.cmdbuf.len = 0;
     E.cx = 0;
     E.cy = 0;
     E.rx = 0;
