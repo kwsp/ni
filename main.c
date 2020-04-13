@@ -51,6 +51,7 @@ struct editorConfig {
     int screencols;
     int numrows; // No. rows in buffer
     erow *row; // dynamically allocated line array of the buffer
+    char *filename; // file in current editor buffer
     struct termios orig_termios; // Original terminal attributes
 };
 
@@ -279,6 +280,9 @@ void editorAppendRow(char *s, size_t len) {
 
 /*** file i/o ***/
 void editorOpen(char *filename) {
+    free(E.filename);
+    E.filename = strdup(filename);
+
     FILE *fp = fopen(filename, "r");
     if (!fp) die("fopen");
 
@@ -395,10 +399,34 @@ void editorDrawRows(struct abuf *ab) {
 
         // Clear line
         abAppend(ab, "\x1b[K", 3);
-        if (y < E.screenrows -1) {
-            abAppend(ab, "\r\n", 2);
+        abAppend(ab, "\r\n", 2);
+    }
+}
+
+void editorDrawStatusBar(struct abuf *ab) {
+    abAppend(ab, "\x1b[7m", 4); // Set status bar background
+
+    // Create status (left) and rstatus (right) messages
+    char status[80], rstatus[80];
+    int len = snprintf(status, sizeof(status), " %.20s - %d lines", E.filename ? E.filename : "[No name]", E.numrows);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d ", E.cy + 1, E.cx + 1);
+
+    if (len > E.screencols) len = E.screencols;
+
+    // Align status to the left
+    abAppend(ab, status, len);
+
+    // Alight rstatus to the right
+    while (len < E.screencols) {
+        if (E.screencols - len == rlen) {
+            abAppend(ab, rstatus, rlen);
+            break;
+        } else {
+            abAppend(ab, " ", 1);
+            ++len;
         }
     }
+    abAppend(ab, "\x1b[m", 3); // Clear status bar formatting
 }
 
 void editorRefreshScreen() {
@@ -410,7 +438,8 @@ void editorRefreshScreen() {
     // Reset cursor
     abAppend(&ab, "\x1b[H", 3);
 
-    editorDrawRows(&ab);
+    editorDrawRows(&ab);  // Draw editor buffer
+    editorDrawStatusBar(&ab); // Draw status line
 
     // Set cursor position
     char buf[32];
@@ -526,8 +555,11 @@ void initEditor() {
     E.coloff = 0;
     E.numrows = 0;
     E.row = NULL;
+    E.filename = NULL;
 
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+    // Make room for a 1 line status bar
+    E.screenrows -= 1;
 }
 
 int main(int argc, char **argv) {
