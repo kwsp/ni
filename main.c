@@ -35,6 +35,12 @@ enum editorKeys {
     PAGE_DOWN
 };
 
+enum editorModes {
+    INSERT_MODE,
+    NORMAL_MODE,
+    COMMAND_MODE
+};
+
 /*** data ***/
 
 typedef struct {
@@ -45,6 +51,7 @@ typedef struct {
 } erow;
 
 struct editorConfig {
+    enum editorModes mode; // Editor mode
     int cx, cy; // Cursor coord in files
     int rx; // Cursor x rendered with tabs
     int rowoff; // Row offset for scroll
@@ -407,12 +414,31 @@ void editorDrawRows(struct abuf *ab) {
     }
 }
 
+char *editorGetMode() {
+    switch (E.mode) {
+        case INSERT_MODE:
+            {
+                return "INSERT\0";
+            }
+        case NORMAL_MODE:
+            {
+                return "NORMAL\0";
+            }
+        case COMMAND_MODE:
+            {
+                return "COMMAND\0";
+            }
+    }
+    return "UNKNOWN\0";
+}
+
 void editorDrawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4); // Set status bar background
 
     // Create status (left) and rstatus (right) messages
     char status[80], rstatus[80];
-    int len = snprintf(status, sizeof(status), " %.20s - %d lines", E.filename ? E.filename : "[No name]", E.numrows);
+    char* mode = editorGetMode();
+    int len = snprintf(status, sizeof(status), " %.20s | %.20s | %d lines", mode, E.filename ? E.filename : "[No name]", E.numrows);
     int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d ", E.cy + 1, E.cx + 1);
 
     if (len > E.screencols) len = E.screencols;
@@ -484,16 +510,19 @@ void editorMoveCursor(int key) {
     erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
 
     switch (key) {
+        case 'k':
         case ARROW_UP:
             if (E.cy != 0) {
                 E.cy--;
             }
             break;
+        case 'j':
         case ARROW_DOWN:
             if (E.cy < E.numrows) {
                 E.cy++;
             }
             break;
+        case 'h':
         case ARROW_LEFT:
             if (E.cx != 0) {
                 E.cx--;
@@ -502,6 +531,7 @@ void editorMoveCursor(int key) {
                 E.cx = E.row[E.cy].size;
             }
             break;
+        case 'l':
         case ARROW_RIGHT:
             if (row && E.cx < row->size) {
                 E.cx++;
@@ -526,51 +556,91 @@ void editorMoveCursor(int key) {
 void editorProcessKeypress() {
     int c = editorReadKey();
 
-    switch (c) {
-        case CTRL_KEY('q'):
-            editorClearScreen();
-            exit(0);
-            break;
+    if (E.mode == NORMAL_MODE) {
+        switch (c) {
+            case 'i':
+                E.mode = INSERT_MODE;
+                break;
+            case ':':
+                E.mode = COMMAND_MODE;
+                break;
 
-        case HOME_KEY:
-            E.cx = 0;
-            break;
-        case END_KEY:
-            if (E.cy < E.numrows) {
-                E.cx = E.row[E.cy].size;
-            }
-            break;
+            case CTRL_KEY('q'): // Ctrl-Q to quit
+                editorClearScreen();
+                exit(0);
+                break;
 
-        case PAGE_UP:
-        case PAGE_DOWN:
-            {
-                // Move cursor to top or bottom of screen
-                if (c == PAGE_UP) {
-                    E.cy = E.rowoff;
-                } else if (c == PAGE_DOWN) {
-                    E.cy = E.rowoff + E.screenrows - 1;
-                    if (E.cy > E.numrows) E.cy = E.numrows;
+            // Beginning of line
+            case '0':
+            case HOME_KEY:
+                E.cx = 0;
+                break;
+
+            // End of line
+            case '$':
+            case END_KEY:
+                if (E.cy < E.numrows) {
+                    E.cx = E.row[E.cy].size;
                 }
+                break;
 
-                int times = E.screenrows;
-                while (times--) {
-                    editorMoveCursor(c==PAGE_DOWN ? ARROW_DOWN : ARROW_UP);
+            case PAGE_UP:
+            case PAGE_DOWN:
+                {
+                    // Move cursor to top or bottom of screen
+                    if (c == PAGE_UP) {
+                        E.cy = E.rowoff;
+                    } else if (c == PAGE_DOWN) {
+                        E.cy = E.rowoff + E.screenrows - 1;
+                        if (E.cy > E.numrows) E.cy = E.numrows;
+                    }
+
+                    int times = E.screenrows;
+                    while (times--) {
+                        editorMoveCursor(c==PAGE_DOWN ? ARROW_DOWN : ARROW_UP);
+                    }
                 }
-            }
-            break;
+                break;
 
-        case ARROW_UP:
-        case ARROW_DOWN:
-        case ARROW_LEFT:
-        case ARROW_RIGHT:
-            editorMoveCursor(c);
-            break;
+            case 'k':
+            case 'j':
+            case 'l':
+            case 'h':
+            case ARROW_UP:
+            case ARROW_DOWN:
+            case ARROW_LEFT:
+            case ARROW_RIGHT:
+                editorMoveCursor(c);
+                break;
+        }
+
+    } else if (E.mode == INSERT_MODE) {
+        switch (c) {
+            case '\x1b': // Esc to return to normal mode
+                E.mode = NORMAL_MODE;
+                break;
+
+            case ARROW_UP:
+            case ARROW_DOWN:
+            case ARROW_LEFT:
+            case ARROW_RIGHT:
+                editorMoveCursor(c);
+                break;
+        }
+    } else {
+        switch (c) {
+            case '\x1b': // Esc to return to normal mode
+                E.mode = NORMAL_MODE;
+                break;
+
+        }
     }
 }
 
 /*** init ***/
 
 void initEditor() {
+    E.mode = NORMAL_MODE;
     E.cx = 0;
     E.cy = 0;
     E.rx = 0;
