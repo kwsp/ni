@@ -7,11 +7,13 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <termio.h>
+#include <time.h>
 #include <unistd.h>
 
 /***defines ***/
@@ -52,6 +54,8 @@ struct editorConfig {
     int numrows; // No. rows in buffer
     erow *row; // dynamically allocated line array of the buffer
     char *filename; // file in current editor buffer
+    char statusmsg[80];
+    time_t statusmsg_time;
     struct termios orig_termios; // Original terminal attributes
 };
 
@@ -427,6 +431,16 @@ void editorDrawStatusBar(struct abuf *ab) {
         }
     }
     abAppend(ab, "\x1b[m", 3); // Clear status bar formatting
+    abAppend(ab, "\r\n", 2);
+}
+
+void editorDrawMessageBar(struct abuf *ab) {
+    abAppend(ab, "\x1b[K", 3); // Clear line
+    int msglen = strlen(E.statusmsg);
+    if (msglen > E.screencols) msglen = E.screencols;
+    if (msglen && time(NULL) - E.statusmsg_time < 5) {
+        abAppend(ab, E.statusmsg, msglen);
+    }
 }
 
 void editorRefreshScreen() {
@@ -440,6 +454,7 @@ void editorRefreshScreen() {
 
     editorDrawRows(&ab);  // Draw editor buffer
     editorDrawStatusBar(&ab); // Draw status line
+    editorDrawMessageBar(&ab); // Draw status message
 
     // Set cursor position
     char buf[32];
@@ -452,6 +467,14 @@ void editorRefreshScreen() {
     // Write buffer
     write(STDOUT_FILENO, ab.b, ab.len);
     abFree(&ab);
+}
+
+void editorSetStatusMsg(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+    va_end(ap);
+    E.statusmsg_time = time(NULL);
 }
 
 /*** input ***/
@@ -555,11 +578,13 @@ void initEditor() {
     E.coloff = 0;
     E.numrows = 0;
     E.row = NULL;
+    E.statusmsg[0] = '\0';
+    E.statusmsg_time = 0;
     E.filename = NULL;
 
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
-    // Make room for a 1 line status bar
-    E.screenrows -= 1;
+    // Make room for a 1 line status bar and 1 line message
+    E.screenrows -= 2;
 }
 
 int main(int argc, char **argv) {
@@ -568,6 +593,8 @@ int main(int argc, char **argv) {
     if (argc >= 2) {
         editorOpen(argv[1]);
     }
+
+    editorSetStatusMsg("Welcome");
 
     while (1) {
         editorRefreshScreen();
