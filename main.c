@@ -284,6 +284,12 @@ void editorScroll() {
     if (E.cy >= E.rowoff + E.screenrows) {
         E.rowoff = E.cy - E.screenrows + 1;
     }
+    if (E.cx < E.coloff) {
+        E.coloff = E.cx;
+    }
+    if (E.cx >= E.coloff + E.screencols) {
+        E.coloff = E.cx - E.screencols;
+    }
 }
 
 /*
@@ -304,8 +310,12 @@ void editorClearScreen() {
 void editorDrawRows(struct abuf *ab) {
     int y;
     for (y=0; y < E.screenrows; y++) {
+
+        // Vertical offset
         int filerow = y + E.rowoff;
+
         if (filerow >= E.numrows) {
+            // print welcome screen if buffer is empty
             if (E.numrows == 0 && y == E.screenrows / 3) {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome),
@@ -322,13 +332,15 @@ void editorDrawRows(struct abuf *ab) {
                 abAppend(ab, welcome, welcomelen);
 
             } else {
+                // Print ~ in from of empty lines
                 abAppend(ab, "~", 1);
             }
 
         } else {
-            int len = E.row[filerow].size;
+            int len = E.row[filerow].size - E.coloff;
+            if (len < 0) len = 0;
             if (len > E.screencols) len = E.screencols;
-            abAppend(ab, E.row[filerow].chars, len);
+            abAppend(ab, E.row[filerow].chars + E.coloff, len);
         }
 
         // Clear line
@@ -352,7 +364,7 @@ void editorRefreshScreen() {
 
     // Set cursor position
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1 - E.rowoff, E.cx + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1 - E.rowoff, E.cx + 1 - E.coloff);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -366,6 +378,9 @@ void editorRefreshScreen() {
 /*** input ***/
 
 void editorMoveCursor(int key) {
+    // Current row
+    erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+
     switch (key) {
         case ARROW_UP:
             if (E.cy != 0) {
@@ -378,11 +393,22 @@ void editorMoveCursor(int key) {
             }
             break;
         case ARROW_LEFT:
-            if (E.cx != 0) E.cx--;
+            if (E.cx != 0) {
+                E.cx--;
+            }
             break;
         case ARROW_RIGHT:
-            if (E.cx < E.screencols - 1) E.cx++;
+            if (row && E.cx < row->size) {
+                E.cx++;
+            }
             break;
+    }
+
+    // Snap cursor to end of line
+    row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+    int rowlen = row ? row->size : 0;
+    if (E.cx > rowlen) {
+        E.cx = rowlen;
     }
 }
 
