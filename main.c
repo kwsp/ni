@@ -280,6 +280,11 @@ int getWindowSize(int *rows, int *cols) {
 }
 
 /*** row operations ***/
+
+/*
+ * Calculate correct cursor x position on screen
+ * with the correct tab indentations
+ */
 int editorRowCxToRx(erow *row, int cx) {
     int rx = 0;
     int j;
@@ -577,6 +582,9 @@ void editorSetStatusMsg(const char *fmt, ...) {
 
 /*** input ***/
 
+/*
+ * Handle all cursor movement keys
+ */
 void editorMoveCursor(int key) {
     // Current row
     erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
