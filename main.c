@@ -357,6 +357,40 @@ void editorOpen(char *filename) {
     fclose(fp);
 }
 
+/*** commands ***/
+
+/*
+ * Write an escape sequence to the screen.
+ * Escape sequence begins with the "\x1b"
+ * byte which means ESCAPE or 27 in decimal,
+ * followed by '['.
+ * '2J' clears the entire screen
+ */
+void editorExit() {
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
+    exit(0);
+}
+
+/*
+ * Handle command mode commands
+ */
+void editorHandleCommands() {
+    int j;
+    int _write = 0;
+    int _quit = 0;
+    for (j=0; j<E.cmdbuf.len; ++j) {
+        if (E.cmdbuf.b[j] == 'q') {
+            _quit = 1;
+        }
+    }
+    if (_write) {
+        // Write file here
+    }
+
+    if (_quit) editorExit();
+}
+
 /*** output ***/
 
 void editorScroll() {
@@ -379,17 +413,6 @@ void editorScroll() {
     }
 }
 
-/*
- * Write an escape sequence to the screen.
- * Escape sequence begins with the "\x1b"
- * byte which means ESCAPE or 27 in decimal,
- * followed by '['.
- * '2J' clears the entire screen
- */
-void editorClearScreen() {
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
-}
 
 /*
  * Handle drawing each row of the text buffer being edited
@@ -613,8 +636,7 @@ void editorProcessKeypress() {
                 break;
 
             case CTRL_KEY('q'): // Ctrl-Q to quit
-                editorClearScreen();
-                exit(0);
+                editorExit();
                 break;
 
             // Beginning of line
@@ -683,10 +705,14 @@ void editorProcessKeypress() {
     } else if (E.mode == COMMAND_MODE) {
         switch (c) {
             case 13: // Enter key executes command
-                // Execute command
-                // Clear command buffer
+                editorHandleCommands();
 
-                // return to normal by falling through
+                // Clear command buffer and return to normal mode
+                abFree(&E.cmdbuf); // free the command buffer
+                editorSetStatusMsg(""); // clear status message
+                E.mode = NORMAL_MODE;
+                break;
+
             case '\x1b': // Esc to return to normal mode
                 abFree(&E.cmdbuf); // free the command buffer
                 editorSetStatusMsg(""); // clear status message
