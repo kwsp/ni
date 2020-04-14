@@ -12,7 +12,13 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
+
+#ifdef __APPLE__
+#include <termios.h>
+#else
 #include <termio.h>
+#endif
+
 #include <time.h>
 #include <unistd.h>
 
