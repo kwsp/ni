@@ -689,6 +689,7 @@ void editorProcessKeypress() {
                 // return to normal by falling through
             case '\x1b': // Esc to return to normal mode
                 abFree(&E.cmdbuf); // free the command buffer
+                editorSetStatusMsg(""); // clear status message
                 E.mode = NORMAL_MODE;
                 break;
 
