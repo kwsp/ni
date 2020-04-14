@@ -357,8 +357,6 @@ void editorOpen(char *filename) {
     fclose(fp);
 }
 
-/*** commands ***/
-
 /*
  * Write an escape sequence to the screen.
  * Escape sequence begins with the "\x1b"
@@ -372,10 +370,23 @@ void editorExit() {
     exit(0);
 }
 
+/*** Normal mode ***/
+
+/*
+ * Process new numeric values to
+ * generate the proper number of
+ * reps a command will be ran
+ */
+void editorNormalModeNumRep(int n) {
+    E.cmdrep = E.cmdrep*10 + n;
+}
+
+/*** Command mode ***/
+
 /*
  * Handle command mode commands
  */
-void editorHandleCommands() {
+void editorCommandModeHandle() {
     int j;
     int _write = 0;
     int _quit = 0;
@@ -507,11 +518,27 @@ void editorDrawStatusBar(abuf *ab) {
 
 void editorDrawMessageBar(abuf *ab) {
     abAppend(ab, "\x1b[K", 3); // Clear line
+
     int msglen = strlen(E.statusmsg);
     if (msglen > E.screencols) msglen = E.screencols;
     /*if (msglen && time(NULL) - E.statusmsg_time < 5) {*/
     abAppend(ab, E.statusmsg, msglen);
     /*}*/
+
+    if (E.cmdrep != 0) {
+        char rstatusmsg[10];
+        int rlen = snprintf(rstatusmsg, sizeof(rstatusmsg), "%d ", E.cmdrep);
+        // Alight rstatus to the right
+        while (msglen < E.screencols) {
+            if (E.screencols - msglen == rlen) {
+                abAppend(ab, rstatusmsg, rlen);
+                break;
+            } else {
+                abAppend(ab, " ", 1);
+                ++msglen;
+            }
+        }
+    }
 }
 
 void editorRefreshScreen() {
@@ -626,67 +653,81 @@ void editorProcessKeypress() {
     int c = editorReadKey();
 
     if (E.mode == NORMAL_MODE) {
-        switch (c) {
-            case 'i':
-                E.mode = INSERT_MODE;
-                break;
-            case ':':
-                E.mode = COMMAND_MODE;
-                editorSetStatusMsg(":");
-                break;
 
-            case CTRL_KEY('q'): // Ctrl-Q to quit
-                editorExit();
-                break;
+        if (c <= '9' && (c >= '1' || (E.cmdrep !=0 && c >= '0'))) {
+            // If the char is between 1-9, start counting for rep cmd
+            // and from now on 0 is acceptable as well (normally beginning of line)
+            editorNormalModeNumRep(c-'0');
+        } else {
 
-            // Beginning of line
-            case '0':
-            case HOME_KEY:
-                E.cx = 0;
-                break;
+            switch (c) {
+                // Insert mode
+                case 'i':
+                    E.mode = INSERT_MODE;
+                    break;
 
-            // End of line
-            case '$':
-            case END_KEY:
-                if (E.cy < E.numrows) {
-                    E.cx = E.row[E.cy].size;
-                }
-                break;
+                    // Command mode
+                case ':':
+                    E.mode = COMMAND_MODE;
+                    editorSetStatusMsg(":");
+                    break;
 
-            case PAGE_UP:
-            case PAGE_DOWN:
-                {
-                    // Move cursor to top or bottom of screen
-                    if (c == PAGE_UP) {
-                        E.cy = E.rowoff;
-                    } else if (c == PAGE_DOWN) {
-                        E.cy = E.rowoff + E.screenrows - 1;
-                        if (E.cy > E.numrows) E.cy = E.numrows;
+                    // Easy quit command
+                case CTRL_KEY('q'): // Ctrl-Q to quit
+                    editorExit();
+                    break;
+
+                    // Beginning of line
+                case '0':
+                case HOME_KEY:
+                    E.cx = 0;
+                    break;
+
+                    // End of line
+                case '$':
+                case END_KEY:
+                    if (E.cy < E.numrows) {
+                        E.cx = E.row[E.cy].size;
                     }
+                    break;
 
-                    int times = E.screenrows;
-                    while (times--) {
-                        editorMoveCursor(c==PAGE_DOWN ? ARROW_DOWN : ARROW_UP);
+                case PAGE_UP:
+                case PAGE_DOWN:
+                    {
+                        // Move cursor to top or bottom of screen
+                        if (c == PAGE_UP) {
+                            E.cy = E.rowoff;
+                        } else if (c == PAGE_DOWN) {
+                            E.cy = E.rowoff + E.screenrows - 1;
+                            if (E.cy > E.numrows) E.cy = E.numrows;
+                        }
+
+                        int times = E.screenrows;
+                        while (times--) {
+                            editorMoveCursor(c==PAGE_DOWN ? ARROW_DOWN : ARROW_UP);
+                        }
                     }
-                }
-                break;
+                    break;
 
-            case 'k':
-            case 'j':
-            case 'l':
-            case 'h':
-            case ARROW_UP:
-            case ARROW_DOWN:
-            case ARROW_LEFT:
-            case ARROW_RIGHT:
-            case 'w':
-            case 'W':
-            case 'b':
-            case 'B':
-            case 'e':
-            case 'E':
-                editorMoveCursor(c);
-                break;
+                case 'k':
+                case 'j':
+                case 'l':
+                case 'h':
+                case ARROW_UP:
+                case ARROW_DOWN:
+                case ARROW_LEFT:
+                case ARROW_RIGHT:
+                case 'w':
+                case 'W':
+                case 'b':
+                case 'B':
+                case 'e':
+                case 'E':
+                    editorMoveCursor(c);
+                    break;
+            }
+
+            E.cmdrep = 0;
         }
 
     } else if (E.mode == INSERT_MODE) {
@@ -705,7 +746,7 @@ void editorProcessKeypress() {
     } else if (E.mode == COMMAND_MODE) {
         switch (c) {
             case 13: // Enter key executes command
-                editorHandleCommands();
+                editorCommandModeHandle();
 
                 // Clear command buffer and return to normal mode
                 abFree(&E.cmdbuf); // free the command buffer
